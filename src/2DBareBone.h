@@ -221,7 +221,7 @@ void BareBone2D<T>::initialize() {
     std::cout << "dx = " << dx << " m" << std::endl;
     std::cout << "dy = " << dy << " m" << std::endl;
     std::cout << "dt = " << dt << " s" << std::endl;
-    std::cout << "steps= " << Nt << std::endl;
+    std::cout << "steps = " << Nt << std::endl;
     std::cout << "--------------------------------" << std::endl;
 }
 
