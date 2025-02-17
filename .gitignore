@@ -30,3 +30,23 @@
 *.exe
 *.out
 *.app
+
+# Data
+plots/
+data/
+
+# Build directory
+build/
+bin/
+
+# CMake cache
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# VSCode
+.vscode/
+
+# PDF
+docs/
+*.pdf
