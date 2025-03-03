@@ -6,14 +6,22 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import argparse
 
-def plot_2d_field(filename, Nx, Ny, Lx, Ly, field_name, title="2D FDTD Field"):
+def plot_2d_field(
+    filename, 
+    Nx, 
+    Ny, 
+    Lx, 
+    Ly, 
+    field_name, 
+    title="2D FDTD Field"
+):
     data = np.loadtxt(filename)
     
     field = data.reshape((Nx, Ny))
     if field_name.startswith('H'):
         field *= 377
     
-    x = np.linspace(0, Lx*1e3, Nx)  # Convert to mm
+    x = np.linspace(0, Lx*1e3, Nx)  # Convert to mm 
     y = np.linspace(0, Ly*1e3, Ny)  # Convert to mm
     
     plt.figure(figsize=(10, 8))
@@ -26,7 +34,6 @@ def plot_2d_field(filename, Nx, Ny, Lx, Ly, field_name, title="2D FDTD Field"):
     plt.xlabel('X Position (mm)')
     plt.ylabel('Y Position (mm)')
     plt.title(title)
-    
     return plt
 
 def plot_final_frame(directory, Nx, Ny, Lx, Ly, field_name="Array0"):

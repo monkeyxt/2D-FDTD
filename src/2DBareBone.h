@@ -9,6 +9,8 @@
 #include <numbers>
 #include <cassert>
 #include <omp.h>
+
+#include "pulses.h"
 #include "constants.h"
 #include "snapshot.h"
 
@@ -27,9 +29,7 @@ public:
                         const T Ly_,
                         const T courantFactor_,
                         const T tMax_,
-                        const T fSrc_,
-                        const T sourcePositionx_,
-                        const T sourcePositiony_,
+                        Pulse<T>& source_,
                         Snapshot<T>& snapshot_);
 
     ~BareBone2D() = default;
@@ -41,18 +41,22 @@ public:
     BareBone2D& operator=(BareBone2D&&) = delete;
 
     /// Setup material dielectric parameters
-    void setupMaterialEps(const T boundary,
-                          const T er1,
-                          const T er2);
+    void setupMaterialEps(std::vector<std::vector<T>>&& epsR_);
 
     /// Setup material magnetic parameters
-    void setupMaterialMu(const T boundary,
-                         const T mu1,
-                         const T mu2);
+    void setupMaterialMu(std::vector<std::vector<T>>&& muR_);
 
     /// Setup PML boundary
     void setupPMLBoundary(const T sigmaMax,
                           const T factor);
+
+    /// Setup material conductivity parameters
+    void setupMaterialSigmaE(std::vector<std::vector<T>>&& sigmaEx_,
+                             std::vector<std::vector<T>>&& sigmaEy_);
+
+    /// Setup material sigma for magnetic field
+    void setupMaterialSigmaM(std::vector<std::vector<T>>&& sigmaMx_,
+                             std::vector<std::vector<T>>&& sigmaMy_);
 
     /// Compute update coefficients
     void computeUpdateCoefficients();
@@ -80,11 +84,8 @@ private:
     std::size_t Nt;            /// number of time steps
 
     /// Source parameters
-    const T fSrc;                  /// source frequency in Hz
-    const T sourcePositionx;       /// source position in meters
-    const T sourcePositiony;       /// source position in meters
-    std::size_t srcIndexx;         /// source index
-    std::size_t srcIndexy;         /// source index
+    Pulse<T>& source;
+    std::vector<PositionTypeIdx> srcIndex;  /// computed source index
 
     /// Field arrays
     std::vector<std::vector<T>> Ez;
@@ -110,13 +111,6 @@ private:
     /// Snapshot handler
     Snapshot<T>& snapshot;
 
-    /// Default source function
-    /// Will allow option for more user-defined source functions in the future
-    std::function<T(T)> source = [this](T t) {
-        T omega = 2.0 * std::numbers::pi * fSrc;
-        return std::sin(omega * t);
-    };
-
     /// Initialization
     void initialize();
 
@@ -125,6 +119,9 @@ private:
 
     /// Update magnetic field
     void updateMagneticField();
+
+    /// Update source
+    void updateSource(const std::size_t t);
 };
 
 template<FloatingPoint T>
@@ -136,9 +133,7 @@ BareBone2D<T>::BareBone2D(const std::size_t Nx_,
                           const T Ly_,
                           const T courantFactor_,
                           const T tMax_,
-                          const T fSrc_,
-                          const T sourcePositionx_,
-                          const T sourcePositiony_,
+                          Pulse<T>& source_,
                           Snapshot<T>& snapshot_)
     : Nx(Nx_), 
       Ny(Ny_), 
@@ -148,9 +143,7 @@ BareBone2D<T>::BareBone2D(const std::size_t Nx_,
       Ly(Ly_), 
       courantFactor(courantFactor_), 
       tMax(tMax_), 
-      fSrc(fSrc_), 
-      sourcePositionx(sourcePositionx_), 
-      sourcePositiony(sourcePositiony_), 
+      source(source_), 
       snapshot(snapshot_) {
     if (Nx <= 2) {
         throw std::runtime_error("Nx must be greater than 2");
@@ -208,10 +201,27 @@ void BareBone2D<T>::initialize() {
     cezh.resize(Nx, std::vector<T>(Ny, 0.0));
 
     /// Calculate location of the source index
-    srcIndexx = static_cast<std::size_t>(sourcePositionx / dx);
-    srcIndexy = static_cast<std::size_t>(sourcePositiony / dy);
-    if (srcIndexx >= Nx || srcIndexy >= Ny) {
-        throw std::runtime_error("Source position is out of bounds");
+    srcIndex.clear();
+    if (auto* planeWave = dynamic_cast<PlaneWavePulse<T>*>(&source)) {
+        std::size_t xIndex = static_cast<std::size_t>(planeWave->getSourcePositions()[0].first / dx);
+        if (xIndex >= Nx) {
+            throw std::runtime_error("Source position is out of bounds");
+        }
+        // For plane wave, create source points along entire y-axis at x position
+        for (std::size_t j = 0; j < Ny; j++) {
+            srcIndex.push_back({xIndex, j});
+        }
+    }
+    else if (auto* pointSource = dynamic_cast<PointSourcePulse<T>*>(&source)) {
+        // For point source, use the exact position
+        for (const auto& pos : pointSource->getSourcePositions()) {
+            std::size_t xIdx = static_cast<std::size_t>(pos.first / dx);
+            std::size_t yIdx = static_cast<std::size_t>(pos.second / dy);
+            if (xIdx >= Nx || yIdx >= Ny) {
+                throw std::runtime_error("Source position is out of bounds");
+            }
+            srcIndex.push_back({xIdx, yIdx});
+        }
     }
 
     std::cout << "Simulation parameters:" << std::endl;
@@ -226,41 +236,27 @@ void BareBone2D<T>::initialize() {
 }
 
 template<FloatingPoint T>
-void BareBone2D<T>::setupMaterialEps(const T boundary,
-                                     const T er1,
-                                     const T er2) {
-    if(boundary > Lx || boundary < 0.0) {
-        throw std::runtime_error("Boundary is out of bounds");
-    }
-    const std::size_t boundaryIndex 
-        = static_cast<std::size_t>(boundary / dx);    
-    for(std::size_t j = 0; j < Ny; j++) {
-        for(std::size_t i = 0; i < boundaryIndex; i++) {
-            epsR[i][j] = er1;
-        }
-        for(std::size_t i = boundaryIndex; i < Nx; i++) {
-            epsR[i][j] = er2;
-        }
-    }
+void BareBone2D<T>::setupMaterialEps(std::vector<std::vector<T>>&& epsR_) {
+    epsR = std::move(epsR_);
 }
 
 template<FloatingPoint T>
-void BareBone2D<T>::setupMaterialMu(const T boundary,
-                                    const T mu1,
-                                    const T mu2) {
-    if(boundary > Lx || boundary < 0.0) {
-        throw std::runtime_error("Boundary is out of bounds");
-    }
-    const std::size_t boundaryIndex 
-        = static_cast<std::size_t>(boundary / dx);    
-    for(std::size_t j = 0; j < Ny; j++) {
-        for(std::size_t i = 0; i < boundaryIndex; i++) {
-            muR[i][j] = mu1;
-        }
-        for(std::size_t i = boundaryIndex; i < Nx; i++) {
-            muR[i][j] = mu2;
-        }
-    }
+void BareBone2D<T>::setupMaterialMu(std::vector<std::vector<T>>&& muR_) {
+    muR = std::move(muR_);
+}
+
+template<FloatingPoint T>
+void BareBone2D<T>::setupMaterialSigmaE(std::vector<std::vector<T>>&& sigmaEx_,
+                                        std::vector<std::vector<T>>&& sigmaEy_) {
+    sigmaEx = std::move(sigmaEx_);
+    sigmaEy = std::move(sigmaEy_);
+}
+
+template<FloatingPoint T>
+void BareBone2D<T>::setupMaterialSigmaM(std::vector<std::vector<T>>&& sigmaMx_,
+                                        std::vector<std::vector<T>>&& sigmaMy_) {
+    sigmaMx = std::move(sigmaMx_);
+    sigmaMy = std::move(sigmaMy_);
 }
 
 template<FloatingPoint T>
@@ -385,12 +381,20 @@ void BareBone2D<T>::updateMagneticField() {
 }
 
 template<FloatingPoint T>
+void BareBone2D<T>::updateSource(const std::size_t t) {
+    for(const auto& src : srcIndex) {
+        auto pulseInc = source.computePulse(t * dt, src);
+        Ez[src.first][src.second] += pulseInc;
+    }
+}
+
+template<FloatingPoint T>
 void BareBone2D<T>::runSimulation() {
     /// Run simulation for Nt time steps
     for (std::size_t t = 0; t < Nt; t++) {
         updateMagneticField();
         updateElectricField();
-        Ez[srcIndexx][srcIndexy] += source(t * dt);
+        updateSource(t);
     }
     writeFields();
 }

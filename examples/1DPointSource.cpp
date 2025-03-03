@@ -1,5 +1,6 @@
 #include "1DBareBone.h"
 #include "snapshot.h"
+#include "pulses.h"
 
 ///============================================================================
 /// Simple 1D FDTD simulation with a point source
@@ -14,18 +15,18 @@ int main(int argc, char* argv[]) {
     const double fSrc = 30e9;
     const double sourcePosition = 0.05;
 
-    std::string dataDir = "../data/FDTD1D_1"; // Default directory
+    std::string dataDir = "../data/1DPointSource"; // Default directory
     if (argc > 1) {
         dataDir = argv[1];
     }
     Snapshot<double> snapshot(dataDir);
+    PointSourcePulse<double> source(fSrc, tMax, {{sourcePosition, 0.0}});
     BareBone1D<double> simulation(Nx, 
                                   Npml, 
                                   Lx, 
                                   CourantFactor, 
                                   tMax, 
-                                  fSrc, 
-                                  sourcePosition, 
+                                  source, 
                                   snapshot);
     simulation.computeUpdateCoefficients();
 

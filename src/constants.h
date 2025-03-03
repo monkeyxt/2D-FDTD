@@ -18,4 +18,11 @@ inline constexpr double eta0 = 376.730313412;       // Free space impedance
 template<typename T>
 concept FloatingPoint = std::is_floating_point_v<T>;
 
+///============================================================================
+/// Type alias for position type
+///============================================================================
+template<FloatingPoint T>
+using PositionType = std::pair<T, T>;
+using PositionTypeIdx = std::pair<std::size_t, std::size_t>;
+
 #endif // EMSOLVER_CONSTANTS_H

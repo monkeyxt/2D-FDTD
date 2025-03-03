@@ -1,6 +1,6 @@
 #include "2DBareBone.h"
 #include "snapshot.h"
-
+#include "pulses.h"
 ///============================================================================
 /// Simple 2D FDTD simulation with a point source, with a water barrier
 ///============================================================================
@@ -18,18 +18,30 @@ int main(int argc, char* argv[]) {
     const double sourcePositionx = 0.004;
     const double sourcePositiony = 0.004;
 
-    std::string dataDir = "../data/FDTD2D_2"; // Default directory
+    std::string dataDir = "../data/2DPointSourceWLoss"; // Default directory
     if (argc > 1) {
         dataDir = argv[1];
     }
 
     Snapshot<double> snapshot(dataDir);
+
+    /// Initialize a point source
+    PositionType sourcePosition = {sourcePositionx, sourcePositiony};
+    PointSourcePulse<double> source(fSrc, tMax, {sourcePosition});
+
     BareBone2D<double> simulation(
-        Nx, Ny, Npmlx, Npmly, Lx, Ly, CourantFactor, tMax, fSrc, 
-        sourcePositionx, sourcePositiony, snapshot
+        Nx, Ny, Npmlx, Npmly, Lx, Ly, CourantFactor, tMax, source, snapshot
     );
-    simulation.setupMaterialEps(0.005, 1.0, 1.7);
-    simulation.setupMaterialMu(0.005, 1.0, 10.0);
+
+    std::vector<std::vector<double>> eps(Nx, std::vector<double>(Ny, 0.0));
+    for (std::size_t i = 0; i < Nx; i++) {
+        for (std::size_t j = 0; j < Ny; j++) {
+            if (i * Lx / Nx > 0.005) {
+                eps[i][j] = 0.04;
+            }
+        }
+    }
+    simulation.setupMaterialEps(std::move(eps));
     simulation.computeUpdateCoefficients();
     
     std::cout << "Running simulation..." << std::endl;

@@ -12,6 +12,7 @@
 
 #include "constants.h"
 #include "snapshot.h"
+#include "pulses.h"
 
 ///============================================================================
 /// 1D Barebone Solver for the 1D Wave Equation
@@ -24,9 +25,8 @@ public:
                         std::size_t Npml_,
                         T Lx_, 
                         T courantFactor_, 
-                        T tMax_, 
-                        T fSrc_, 
-                        T sourcePosition_,
+                        T tMax_,
+                        Pulse<T>& source_,
                         Snapshot<T>& snapshot_);
 
     ~BareBone1D() = default;
@@ -38,14 +38,10 @@ public:
     BareBone1D& operator=(BareBone1D&&) = delete;
 
     /// Setup electric permittivity
-    void setupMaterialEps(const T boundary,
-                          const T er1,
-                          const T er2);
+    void setupMaterialEps(const std::vector<T>&& epsR_);
 
     /// Setup magnetic permeability
-    void setupMaterialMu(const T boundary,
-                         const T mu1,
-                         const T mu2);
+    void setupMaterialMu(const std::vector<T>&& muR_);
 
     /// Setup PML boundary
     void setupPMLBoundary(const T sigmaMax, const T factor);
@@ -71,8 +67,7 @@ private:
     std::size_t Nt;    /// number of time steps
 
     /// Source parameters
-    T fSrc;            /// source frequency in Hz
-    T sourcePosition;  /// source position in meters
+    Pulse<T>& source;  /// source pulse
     std::size_t srcIndex;   /// source index
 
     /// Field arrays
@@ -94,14 +89,11 @@ private:
     /// Snapshot handler
     Snapshot<T>& snapshot;
 
-    /// Default source function
-    std::function<T(T)> source = [this](T t) {
-        T omega = 2.0 * std::numbers::pi * fSrc;
-        return std::sin(omega * t);
-    };
-
     /// Initialization
     void initialize();
+
+    /// Update source
+    void updateSource(const std::size_t t);
 };
 
 template <FloatingPoint T>
@@ -110,12 +102,10 @@ BareBone1D<T>::BareBone1D(std::size_t Nx_,
                           T Lx_, 
                           T courantFactor_, 
                           T tMax_, 
-                          T fSrc_, 
-                          T sourcePosition_,
+                          Pulse<T>& source_,
                           Snapshot<T>& snapshot_)
     : Nx(Nx_), Npml(Npml_), Lx(Lx_), courantFactor(courantFactor_), 
-      tMax(tMax_), fSrc(fSrc_), sourcePosition(sourcePosition_), 
-      snapshot(snapshot_) {
+      tMax(tMax_), source(source_), snapshot(snapshot_) {
     if (Nx <= 2) {
         throw std::runtime_error("Nx must be greater than 2");
     }
@@ -152,6 +142,15 @@ void BareBone1D<T>::initialize() {
     chye.resize(Nx);
     chyh.resize(Nx);
 
+    /// Only point source is supported for now
+    if (auto* pointSource = dynamic_cast<PointSourcePulse<T>*>(&source)) {
+        srcIndex = static_cast<std::size_t>(
+            pointSource->getSourcePositions()[0].first / dx);
+    }
+    else {
+        throw std::runtime_error("Only point source is supported for now");
+    }
+
     /// Calculate the source index
     srcIndex = static_cast<std::size_t>(sourcePosition / dx);
     if (srcIndex >= Nx) {
@@ -170,23 +169,13 @@ void BareBone1D<T>::initialize() {
 }
 
 template <FloatingPoint T>
-void BareBone1D<T>::setupMaterialEps(const T boundary,
-                                     const T er1,
-                                     const T er2) {
-    const std::size_t boundaryIndex 
-        = static_cast<std::size_t>(boundary / dx);
-    std::fill_n(epsR.begin(), boundaryIndex, er1);
-    std::fill_n(epsR.begin() + boundaryIndex, Nx - boundaryIndex, er2);
+void BareBone1D<T>::setupMaterialEps(const std::vector<T>&& epsR_) {
+    epsR = epsR_;
 }
 
 template <FloatingPoint T>
-void BareBone1D<T>::setupMaterialMu(const T boundary,
-                                    const T mu1,
-                                    const T mu2) {
-    const std::size_t boundaryIndex 
-        = static_cast<std::size_t>(boundary / dx);
-    std::fill_n(muR.begin(), boundaryIndex, mu1);
-    std::fill_n(muR.begin() + boundaryIndex, Nx - boundaryIndex, mu2);
+void BareBone1D<T>::setupMaterialMu(const std::vector<T>&& muR_) {
+    muR = muR_;
 }
 
 template <FloatingPoint T>
@@ -235,9 +224,17 @@ void BareBone1D<T>::runSimulation() {
         for (std::size_t i = 1; i < Nx; i++) {
             Ez[i] = ceze[i] * Ez[i] + cezh[i] * (Hy[i] - Hy[i - 1]);
         }
-        Ez[srcIndex] += source(t * dt);
+        updateSource(t);
     }
     writeFields();
+}
+
+template <FloatingPoint T>
+void BareBone1D<T>::updateSource(const std::size_t t) {
+    for(const auto& src : srcIndex) {
+        auto pulseInc = source.computePulse(t * dt, src);
+        Ez[src.first] += pulseInc;
+    }
 }
 
 template <FloatingPoint T>

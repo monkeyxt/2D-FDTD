@@ -18,19 +18,19 @@ int main(int argc, char* argv[]) {
     double fSrc = 30e9;
     double sourcePosition = 0.05;
 
-    std::string dataDir = "../data/FDTD1D_3"; // Default directory
+    std::string dataDir = "../data/1DPointSourcePML"; // Default directory
     if (argc > 1) {
         dataDir = argv[1];
     }
     Snapshot<double> snapshot(dataDir);
 
+    PointSourcePulse<double> source(fSrc, tMax, {{sourcePosition, 0.0}});
     BareBone1D<double> simulation(Nx, 
                                   Npml, 
                                   Lx, 
                                   CourantFactor, 
                                   tMax, 
-                                  fSrc, 
-                                  sourcePosition, 
+                                  source, 
                                   snapshot);
     
     // PML parameters
@@ -40,7 +40,7 @@ int main(int argc, char* argv[]) {
         = -(m + 1) * eps0 * c0 * std::log(R0) / (2 * Npml * Lx / Nx);
     std::cout << "sigma_max: " << sigma_max << std::endl;
     simulation.setupPMLBoundary(sigma_max, m);
-    simulation.setupMaterialEps(0.04, 4.0, 1.0);
+    simulation.setupMaterialEps(std::vector<double>{0.04, 4.0, 1.0});
     simulation.computeUpdateCoefficients();
 
     std::cout << "Running simulation..." << std::endl;
