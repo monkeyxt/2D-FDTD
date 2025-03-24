@@ -1,5 +1,5 @@
-# EMSolver
-A simple C++ FDTD solver
+# 2D-FDTD
+A simple 2D C++ FDTD solver
 
 ## Requirements
 ```
